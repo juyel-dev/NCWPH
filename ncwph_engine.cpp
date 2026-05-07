@@ -1,20 +1,16 @@
-// ncwph_engine.cpp
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 #include <vector>
 #include <string>
 #include <cmath>
 #include <algorithm>
-#include <complex>
-#include <cstring>
 #include <random>
+#include <cstring>
 
 using namespace emscripten;
 
-// ==================== MATH UTILS ====================
 const float PI = 3.141592653589793f;
 
-// 2D Gaussian kernel
 std::vector<float> gaussian_kernel(int size, float sigma) {
     std::vector<float> kernel(size * size);
     int half = size / 2;
@@ -30,7 +26,6 @@ std::vector<float> gaussian_kernel(int size, float sigma) {
     return kernel;
 }
 
-// Simple 2D convolution (valid mode)
 std::vector<float> convolve2d(const std::vector<float>& img, int w, int h,
                               const std::vector<float>& kernel, int kw) {
     int kh = kw;
@@ -51,7 +46,6 @@ std::vector<float> convolve2d(const std::vector<float>& img, int w, int h,
     return out;
 }
 
-// Downscale using bilinear interpolation
 std::vector<float> resize(const std::vector<float>& src, int w, int h, int nw, int nh) {
     std::vector<float> dst(nw * nh);
     float scaleX = (float)w / nw;
@@ -80,7 +74,6 @@ std::vector<float> resize(const std::vector<float>& src, int w, int h, int nw, i
     return dst;
 }
 
-// ==================== IMAGE PREPROCESSING ====================
 std::vector<float> rgb_to_gray(const uint8_t* rgba, int w, int h) {
     std::vector<float> gray(w * h);
     for (int i = 0; i < w * h; ++i) {
@@ -98,8 +91,6 @@ std::vector<float> apply_gaussian(const std::vector<float>& img, int w, int h, f
     return convolve2d(img, w, h, kernel, ksize);
 }
 
-// ==================== LOG-POLAR TRANSFORM ====================
-// Map input image to log‑polar coordinates, returning a fixed‑size array (RADIAL x ANGULAR).
 std::vector<float> log_polar(const std::vector<float>& img, int w, int h,
                               int out_radius, int out_angles) {
     std::vector<float> lp(out_radius * out_angles, 0.0f);
@@ -112,7 +103,6 @@ std::vector<float> log_polar(const std::vector<float>& img, int w, int h,
             float angle = 2.0f * PI * a_idx / out_angles;
             float x = center_x + radius * std::cos(angle);
             float y = center_y + radius * std::sin(angle);
-            // Bilinear interpolation
             int x0 = (int)std::floor(x);
             int x1 = x0 + 1;
             int y0 = (int)std::floor(y);
@@ -135,15 +125,10 @@ std::vector<float> log_polar(const std::vector<float>& img, int w, int h,
     return lp;
 }
 
-// ==================== PHASE CONGRUENCY (SIMPLIFIED) ====================
-// Uses oriented Gabor filters at 6 orientations, 4 scales.
-// Computes local energy and amplitude, then PC = sum(E) / (sum(A) + ε).
 struct GaborFilter {
     std::vector<float> even_kernel;
     std::vector<float> odd_kernel;
     int size;
-    float scale;
-    float orientation;
 };
 
 std::vector<GaborFilter> make_gabor_filters(int scales, int orientations) {
@@ -153,14 +138,12 @@ std::vector<GaborFilter> make_gabor_filters(int scales, int orientations) {
     for (int s = 0; s < scales; ++s) {
         float freq = base_freq * std::pow(freq_factor, s);
         float wavelength = 1.0f / freq;
-        float sigma = wavelength * 0.56f; // bandwidth
+        float sigma = wavelength * 0.56f;
         int ksize = (int)std::ceil(3.0f * sigma) * 2 + 1;
         int half = ksize / 2;
         for (int o = 0; o < orientations; ++o) {
             float theta = PI * o / orientations;
             GaborFilter gf;
-            gf.scale = s;
-            gf.orientation = theta;
             gf.size = ksize;
             gf.even_kernel.resize(ksize*ksize);
             gf.odd_kernel.resize(ksize*ksize);
@@ -170,10 +153,10 @@ std::vector<GaborFilter> make_gabor_filters(int scales, int orientations) {
                     float y_theta = -x * std::sin(theta) + y * std::cos(theta);
                     float gauss = std::exp(-0.5f * (x_theta*x_theta + y_theta*y_theta) / (sigma*sigma));
                     float c = std::cos(2 * PI * freq * x_theta);
-                    float s = std::sin(2 * PI * freq * x_theta);
+                    float si = std::sin(2 * PI * freq * x_theta);
                     int idx = (y+half)*ksize + (x+half);
                     gf.even_kernel[idx] = gauss * c;
-                    gf.odd_kernel[idx] = gauss * s;
+                    gf.odd_kernel[idx] = gauss * si;
                 }
             }
             filters.push_back(gf);
@@ -182,45 +165,35 @@ std::vector<GaborFilter> make_gabor_filters(int scales, int orientations) {
     return filters;
 }
 
-std::vector<float> phase_congruency(const std::vector<float>& img, int w, int h,
-                                    int scales = 4, int orientations = 6) {
+std::vector<float> phase_congruency(const std::vector<float>& img, int w, int h) {
+    int scales = 4, orientations = 6;
     auto filters = make_gabor_filters(scales, orientations);
-    std::vector<std::vector<float>> amplitude(scales*orientations);
-    std::vector<std::vector<float>> energy(scales*orientations);
+    int pc_w = w - filters[0].size + 1;
+    int pc_h = h - filters[0].size + 1;
+    std::vector<float> sumA(pc_w * pc_h, 0.0f);
+    std::vector<float> sumE(pc_w * pc_h, 0.0f);
     for (size_t i = 0; i < filters.size(); ++i) {
         auto& gf = filters[i];
         auto even = convolve2d(img, w, h, gf.even_kernel, gf.size);
         auto odd = convolve2d(img, w, h, gf.odd_kernel, gf.size);
-        int ew = even.size() / (h - gf.size + 1);
-        int eh = even.size() / ew;
-        amplitude[i].resize(ew * eh);
-        energy[i].resize(ew * eh);
-        for (int j = 0; j < ew*eh; ++j) {
-            float e = even[j];
-            float o = odd[j];
-            amplitude[i][j] = std::sqrt(e*e + o*o);
-            energy[i][j] = amplitude[i][j];
-        }
-    }
-    // Compute PC map: sumE / (sumA + epsilon)
-    int pc_w = amplitude[0].size() / (h - filters[0].size + 1);
-    int pc_h = pc_w ? amplitude[0].size() / pc_w : 0;
-    std::vector<float> pc(pc_w * pc_h, 0.0f);
-    const float eps = 0.01f;
-    for (size_t i = 0; i < filters.size(); ++i) {
         for (int j = 0; j < pc_w*pc_h; ++j) {
-            pc[j] += amplitude[i][j];
+            float amp = std::sqrt(even[j]*even[j] + odd[j]*odd[j]);
+            sumA[j] += amp;
+            sumE[j] += amp;
         }
     }
-    for (float& v : pc) v = (v + eps > 0) ? (v / (v + eps)) : 0;
+    std::vector<float> pc(pc_w * pc_h);
+    float eps = 0.01f;
+    for (int j = 0; j < pc_w*pc_h; ++j) {
+        pc[j] = sumE[j] / (sumA[j] + eps);
+    }
     return pc;
 }
 
-// ==================== SPATIAL PYRAMID POOLING ====================
 std::vector<float> spatial_pyramid_pooling(const std::vector<float>& feat_map,
-                                           int w, int h,
-                                           std::vector<int> levels = {1,2,4}) {
+                                           int w, int h) {
     std::vector<float> features;
+    int levels[] = {1, 2, 4};
     for (int L : levels) {
         int cell_h = h / L;
         int cell_w = w / L;
@@ -246,12 +219,10 @@ std::vector<float> spatial_pyramid_pooling(const std::vector<float>& feat_map,
     return features;
 }
 
-// ==================== HASHING ====================
-// Fixed random projection matrix (generated once with fixed seed for reproducibility)
 std::vector<float> projection_matrix(int feature_dim, int hash_bits) {
     static std::vector<float> mat;
     if (!mat.empty()) return mat;
-    std::mt19937 rng(42); // fixed seed
+    std::mt19937 rng(42);
     std::normal_distribution<float> dist(0.0f, 1.0f);
     mat.resize(feature_dim * hash_bits);
     for (size_t i = 0; i < mat.size(); ++i)
@@ -271,44 +242,39 @@ std::string vector_to_hex(const std::vector<uint8_t>& bits) {
     return hex;
 }
 
-// ==================== MAIN HASH FUNCTION ====================
 std::string ncwph_compute_hash(const val& image_typed_array, int w, int h) {
-    // Convert JS Uint8ClampedArray to C vector
     std::vector<uint8_t> img_data(w * h * 4);
     val memory_view{ typed_memory_view(img_data.size(), img_data.data()) };
     memory_view.call<void>("set", image_typed_array);
 
-    // Preprocessing
     std::vector<float> gray = rgb_to_gray(img_data.data(), w, h);
     gray = apply_gaussian(gray, w, h, 1.0f);
 
-    // Resize to 256x256 for consistency
     const int target_size = 256;
     gray = resize(gray, w, h, target_size, target_size);
     w = h = target_size;
 
-    // Log‑polar mapping (128 angles, 64 radial bins)
     std::vector<float> lp = log_polar(gray, w, h, 64, 128);
-
-    // Phase congruency on log‑polar map
     std::vector<float> pc = phase_congruency(lp, 64, 128);
+    
+    int pc_w = 64 - (int)std::ceil(3.0f * (1.0f/0.05f) * 0.56f) * 2;
+    if (pc_w <= 0) pc_w = 32;
+    int pc_h = 128 - (int)std::ceil(3.0f * (1.0f/0.05f) * 0.56f) * 2;
+    if (pc_h <= 0) pc_h = 64;
+    
+    std::vector<float> features = spatial_pyramid_pooling(pc, pc_w, pc_h);
 
-    // Spatial pyramid pooling
-    std::vector<float> features = spatial_pyramid_pooling(pc, pc.size()/128, 128);
-
-    // Normalize to zero mean / unit variance
     float sum = 0.0f, sq_sum = 0.0f;
     for (float v : features) { sum += v; sq_sum += v*v; }
     float mean = sum / features.size();
     float stddev = std::sqrt(sq_sum/features.size() - mean*mean + 1e-8f);
     for (float &v : features) v = (v - mean) / stddev;
 
-    // Pad/trim to 800 dimensions
     int feat_dim = 800;
     std::vector<float> final_features(feat_dim, 0.0f);
-    std::copy(features.begin(), features.begin() + std::min(feat_dim, (int)features.size()), final_features.begin());
+    int copy_len = std::min(feat_dim, (int)features.size());
+    for (int i = 0; i < copy_len; ++i) final_features[i] = features[i];
 
-    // Random projection to 256 bits
     int hash_bits = 256;
     auto proj_mat = projection_matrix(feat_dim, hash_bits);
     std::vector<float> proj(hash_bits, 0.0f);
@@ -317,7 +283,6 @@ std::string ncwph_compute_hash(const val& image_typed_array, int w, int h) {
             proj[b] += final_features[f] * proj_mat[f * hash_bits + b];
         }
     }
-    // Median-cut binarization
     std::vector<float> sorted_proj = proj;
     std::sort(sorted_proj.begin(), sorted_proj.end());
     float median = sorted_proj[hash_bits / 2];
@@ -327,35 +292,32 @@ std::string ncwph_compute_hash(const val& image_typed_array, int w, int h) {
     return vector_to_hex(bits);
 }
 
-// ==================== COMPARISON ====================
 struct CompareResult {
     double similarity;
     bool match;
 };
 
 CompareResult ncwph_compare(const std::string& hash1, const std::string& hash2) {
-    int length = std::min(hash1.size(), hash2.size()) * 4; // hex to bits
+    int length = std::min(hash1.size(), hash2.size()) * 4;
     int diff_bits = 0;
-    for (size_t i = 0; i < hash1.size(); i += 2) {
+    for (size_t i = 0; i < hash1.size() && i < hash2.size(); ++i) {
         auto char_to_nibble = [](char c) -> int {
             if (c >= '0' && c <= '9') return c - '0';
             if (c >= 'a' && c <= 'f') return c - 'a' + 10;
             return 0;
         };
-        int byte1 = (char_to_nibble(hash1[i]) << 4) | char_to_nibble(hash1[i+1]);
-        int byte2 = (char_to_nibble(hash2[i]) << 4) | char_to_nibble(hash2[i+1]);
+        int byte1 = char_to_nibble(hash1[i]);
+        int byte2 = char_to_nibble(hash2[i]);
         uint8_t diff = byte1 ^ byte2;
-        diff_bits += __builtin_popcount(diff);
+        while (diff) { diff_bits += diff & 1; diff >>= 1; }
     }
     double similarity = 1.0 - (double)diff_bits / length;
-    double threshold = 0.7;
     CompareResult res;
     res.similarity = similarity;
-    res.match = similarity > threshold;
+    res.match = similarity > 0.7;
     return res;
 }
 
-// ==================== EMSCRIPTEN BINDINGS ====================
 EMSCRIPTEN_BINDINGS(ncwph_module) {
     function("computeHash", &ncwph_compute_hash);
     function("compare", &ncwph_compare);
