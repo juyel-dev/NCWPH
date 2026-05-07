@@ -4,7 +4,6 @@ on:
   push:
     branches: [ main ]
 
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
 concurrency:
   group: "pages"
   cancel-in-progress: false
@@ -29,13 +28,12 @@ jobs:
           em++ ncwph_engine.cpp \
             -o dist/ncwph_engine.js \
             -s WASM=1 \
-            -s EXPORTED_FUNCTIONS='["_ncwph_compute_hash","_ncwph_compare"]' \
-            -s EXPORTED_RUNTIME_METHODS='["cwrap","getValue","setValue"]' \
             -s MODULARIZE=1 \
             -s EXPORT_NAME="Module" \
             -s ALLOW_MEMORY_GROWTH=1 \
             -O3 \
-            --bind
+            --bind \
+            -s NO_EXIT_RUNTIME=1
 
       - name: Copy static assets to dist
         run: |
