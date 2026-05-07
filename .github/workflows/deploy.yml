@@ -1,0 +1,56 @@
+name: Build & Deploy NCWPH to Pages
+
+on:
+  push:
+    branches: [ main ]
+
+# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.47
+
+      - name: Compile C++ to WASM
+        run: |
+          em++ ncwph_engine.cpp \
+            -o dist/ncwph_engine.js \
+            -s WASM=1 \
+            -s EXPORTED_FUNCTIONS='["_ncwph_compute_hash","_ncwph_compare"]' \
+            -s EXPORTED_RUNTIME_METHODS='["cwrap","getValue","setValue"]' \
+            -s MODULARIZE=1 \
+            -s EXPORT_NAME="Module" \
+            -s ALLOW_MEMORY_GROWTH=1 \
+            -O3 \
+            --bind
+          mkdir -p dist
+          cp ncwph_engine.wasm dist/
+          cp ncwph_engine.js dist/
+
+      - name: Copy static assets to dist
+        run: |
+          cp index.html dist/
+          cp app.js dist/
+          cp sw.js dist/
+          cp manifest.json dist/
+          cp icon.svg dist/
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          publish_branch: gh-pages
+          enable_jekyll: false
