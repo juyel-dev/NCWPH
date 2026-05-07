@@ -25,6 +25,7 @@ jobs:
 
       - name: Compile C++ to WASM
         run: |
+          mkdir -p dist
           em++ ncwph_engine.cpp \
             -o dist/ncwph_engine.js \
             -s WASM=1 \
@@ -35,9 +36,6 @@ jobs:
             -s ALLOW_MEMORY_GROWTH=1 \
             -O3 \
             --bind
-          mkdir -p dist
-          cp ncwph_engine.wasm dist/
-          cp ncwph_engine.js dist/
 
       - name: Copy static assets to dist
         run: |
