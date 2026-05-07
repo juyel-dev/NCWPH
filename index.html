@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f172a"/>
+  <link rel="manifest" href="/manifest.json">
+  <title>NCWPH Identity</title>
+  <style>
+    /* Minimal Tailwind-like styling for light-weight PWA */
+    body { margin:0; font-family: system-ui; background:#0f172a; color:#e2e8f0; display:flex; flex-direction:column; align-items:center; min-height:100vh; }
+    .card { background:#1e293b; border-radius:1rem; padding:1.5rem; margin:1rem; width:90vw; max-width:400px; box-shadow:0 4px 6px rgba(0,0,0,.4); }
+    video, canvas { width:100%; border-radius:0.5rem; }
+    button { background:#3b82f6; border:none; color:white; padding:0.75rem 1.25rem; border-radius:0.5rem; font-weight:bold; width:100%; margin-top:0.5rem; }
+    button:disabled { background:#475569; }
+    .hash { word-break:break-all; font-family:monospace; font-size:0.85rem; background:#0f172a; padding:0.5rem; border-radius:0.25rem; }
+  </style>
+</head>
+<body>
+  <div class="card" style="text-align:center">
+    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="32" cy="32" r="30" stroke="#3b82f6" stroke-width="2" fill="#1e293b"/>
+      <path d="M20 32 L32 20 L44 32 L32 44 Z" stroke="#60a5fa" stroke-width="2" fill="none"/>
+      <circle cx="32" cy="32" r="4" fill="#93c5fd"/>
+      <path d="M32 20 V12 M32 52 V44 M20 32 H12 M52 32 H44" stroke="#60a5fa" stroke-width="1"/>
+    </svg>
+    <h2>NCWPH v2.0</h2>
+    <p>Neural‑Context Wavelet‑Phase Hash</p>
+  </div>
+
+  <div class="card">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas" style="display:none"></canvas>
+    <button id="capture" disabled>📸 Capture & Hash</button>
+    <div id="hash-display" class="hash" style="margin-top:1rem"></div>
+  </div>
+
+  <div class="card">
+    <h3>Compare Hashes</h3>
+    <textarea id="hash1" placeholder="Hash #1" rows="2" class="hash"></textarea>
+    <textarea id="hash2" placeholder="Hash #2" rows="2" class="hash" style="margin-top:0.5rem"></textarea>
+    <button id="compare-btn">⚖️ Compare</button>
+    <div id="compare-result" style="margin-top:0.5rem; font-weight:bold"></div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js');
+      });
+    }
+  </script>
+</body>
+</html>
